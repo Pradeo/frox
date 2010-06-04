@@ -88,6 +88,7 @@ void ftpcmds_init()
 		{"XRMD", send_command},
 		{"XPWD", send_command},
 		{"XCUP", send_command},
+		{"FEAT", send_command},
 #if 0
 		{"APSV", send_command},	/* As per RFC 1579      */
 #endif
