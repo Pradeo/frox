@@ -84,6 +84,9 @@
 /* Whether to use Ipfilter (for non-linux ports) */
 #undef IPFILTER
 
+/* path to the iptables executable */
+#undef IPTABLES
+
 /* Whether to support use of non-transparent proxying */
 #undef NON_TRANS_PROXY
 
@@ -128,6 +131,9 @@
 
 /* Whether to support caching via http */
 #undef USE_HCACHE
+
+/* Whether to use iptables for transparent data connection proxying */
+#undef USE_IPTABLES
 
 /* Whether to support local caching */
 #undef USE_LCACHE

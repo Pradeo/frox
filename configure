@@ -714,6 +714,8 @@ enable_virus_scan
 enable_ssl
 enable_transparent_data
 enable_libiptc
+enable_iptables
+with_iptables
 enable_ccp
 enable_ntp
 enable_run_as_root
@@ -1357,6 +1359,7 @@ Optional Features:
   --enable-ssl     Allow frox to make encrypted SSL/TLS connections
   --enable-transparent-data    Transparent proxying of data connections
   --enable-libiptc        Use libiptc for transparent data connection proxying
+  --enable-iptables        Use iptables for transparent data connection proxying
   --enable-ccp            Enable ftp-proxy style command control programs
   --disable-ntp           Disable use of non transparent proxying
   --enable-run-as-root    Allow running as root
@@ -1364,6 +1367,11 @@ Optional Features:
   --enable-configfile=ARG Location of default config file
   --disable-dependency-tracking  speeds up one-time build
   --enable-dependency-tracking   do not reject slow dependency extractors
+
+Optional Packages:
+  --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+  --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
+  --with-iptables         path to iptables executable, default: /sbin/iptables
 
 Some influential environment variables:
   CC          C compiler command
@@ -3059,6 +3067,52 @@ else
 $as_echo "no" >&6; }
 
 fi
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to use iptables for transparent data connection proxying" >&5
+$as_echo_n "checking whether to use iptables for transparent data connection proxying... " >&6; }
+# Check whether --enable-iptables was given.
+if test "${enable_iptables+set}" = set; then :
+  enableval=$enable_iptables; case "$enableval" in
+		yes)
+			{ $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+
+$as_echo "#define USE_IPTABLES 1" >>confdefs.h
+
+                        enable_iptables=yes
+			;;
+		*)
+                        enable_iptables=no
+			{ $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+			;;
+	esac
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+fi
+
+
+
+# Check whether --with-iptables was given.
+if test "${with_iptables+set}" = set; then :
+  withval=$with_iptables; IPTABLES=$withval
+else
+  IPTABLES=/sbin/iptables
+fi
+
+if test x"${enable_iptables}" = x"yes" -a ! -f $IPTABLES; then
+   { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: The iptables executable $IPTABLES was not found on the system, transparent data proxying will not work." >&5
+$as_echo "$as_me: WARNING: The iptables executable $IPTABLES was not found on the system, transparent data proxying will not work." >&2;}
+   { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: Change it using --with-iptables=<path>." >&5
+$as_echo "$as_me: WARNING: Change it using --with-iptables=<path>." >&2;}
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define IPTABLES "$IPTABLES"
+_ACEOF
 
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to support ftp-proxy style command control programs" >&5

@@ -30,6 +30,7 @@
 
 #if HAVE_LINUX_NETFILTER_IPV4_H
 # include <limits.h>
+# include <netinet/in.h>
 # include <linux/netfilter_ipv4.h>
 #endif
 
@@ -37,6 +38,8 @@
 #if USE_LIBIPTC
 # include <libiptc.h>
 # include <linux/netfilter_ipv4/ip_nat.h>
+#elif USE_IPTABLES
+#include <netinet/in.h>
 #endif
 #endif
 
@@ -44,6 +47,7 @@ static enum {
 	LINUX_2_0,
 	LINUX_2_2,
 	LINUX_2_4,
+	LINUX_2_6,
 	OTHER
 } kernel;
 
@@ -60,6 +64,8 @@ int os_init(void)
 		kernel = LINUX_2_2;
 	else if(!strncmp(tmp.release, "2.4.", 4))
 		kernel = LINUX_2_4;
+	else if(!strncmp(tmp.release, "2.6.", 4))
+		kernel = LINUX_2_6;
 	else
 		kernel = OTHER;
 	return 0;
@@ -181,94 +187,7 @@ int bindtodevice(int fd)
 **  Most of this stuff is a bit of a mess. Perhaps that is
 **  unavoidable...
 **  ------------------------------------------------------------- */
-#ifndef USE_LIBIPTC
-int kernel_transdata_setup()
-{
-	if(kernel != LINUX_2_4)
-		return (0);
-
-	fprintf(stderr,
-		"You appear to be running a 2.4.x Linux kernel,"
-		" but frox was not configured\n"
-		"with --enable-libiptc. Data connections will NOT"
-		" be transparently proxied\n");
-	return (-1);
-}
-
-int kernel_td_connect(struct fd_request req)
-{
-	uid_t uid;
-	int sockfd, i;
-
-	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		debug_perr("socket");
-		return (-1);
-	}
-
-	uid = geteuid();
-	write_log(VERBOSE,
-		  "TDS: Regaining priveliges for bind-to-foreign-address");
-	seteuid(0);
-	i = bind(sockfd, (struct sockaddr *) &req.remote, sizeof(req.remote));
-	write_log(VERBOSE, "TDS: Dropping them again");
-	seteuid(uid);
-
-	if(i) {
-		debug_err("bind failed");
-		close(sockfd);
-		return (-1);
-	}
-
-	i = connect(sockfd, (struct sockaddr *) &req.remote,
-		    sizeof(req.remote));
-
-	if(i) {
-		close(sockfd);
-		return (-1);
-	}
-
-	return (sockfd);
-}
-
-int kernel_td_listen(struct fd_request req)
-{
-	uid_t uid;
-	int i, sockfd;
-
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-
-	uid = geteuid();
-	write_log(VERBOSE,
-		  "TDS: Regaining privelidges for bind-to-foreign-address");
-	seteuid(0);
-	i = bind(sockfd, (struct sockaddr *) &req.local, sizeof(req.local));
-	write_log(VERBOSE, "TDS: Dropping them again");
-	seteuid(uid);
-
-	if(i) {
-		debug_err("bind failed");
-		close(sockfd);
-		return (-1);
-	}
-
-	if(listen(sockfd, 5)) {
-		debug_perr("listen");
-		close(sockfd);
-		return (-1);
-	}
-	return (sockfd);
-}
-
-/*Kernel 2.2.x automatically cleans up after bind-to-foreign-address*/
-int kernel_td_unlisten(struct fd_request req)
-{
-	return (0);
-}
-
-void kernel_td_flush(void)
-{
-}
-#else /*USE_LIBIPTC */
+#if USE_LIBIPTC
 
 #define FROXSNAT "froxsnat"
 #define FROXDNAT "froxdnat"
@@ -385,6 +304,7 @@ int kernel_td_listen(struct fd_request req)
 		close(sockfd);
 		return -1;
 	}
+        free(e);
 
 	return (sockfd);
 }
@@ -406,6 +326,7 @@ int kernel_td_unlisten(struct fd_request req)
 		free(e);
 		return -1;
 	}
+        free(e);
 	return (0);
 }
 
@@ -588,5 +509,320 @@ struct ipt_entry *get_entry(struct sockaddr_in src, struct sockaddr_in dst,
 
 	return e;
 }
+#elif USE_IPTABLES
+/* This method runs iptables on the command line to proxy the transparent data.
+   This method is intented to be portable across Linux systems and works on kernel 2.6. */
+
+#define FROXSNAT "froxsnat"
+#define FROXDNAT "froxdnat"
+
+char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
+               struct sockaddr_in to, int snat, int add_or_remove);
+int exec_rule(const char *rule);
+int init_chains();
+
+int kernel_td_listen(struct fd_request req)
+{
+	struct sockaddr_in address;
+	char *rule;
+	int i, sockfd;
+
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+	i = bind_me(sockfd, &req.local, req.ports);
+
+	if(i) {
+		debug_err("bind failed");
+		close(sockfd);
+		return (-1);
+	}
+
+	if(listen(sockfd, 5)) {
+		debug_perr("listen");
+		close(sockfd);
+		return (-1);
+	}
+
+	/*DO DNAT */
+	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_port = 0;
+	rule = get_rule(address, req.remote, req.local, FALSE, TRUE);
+	if(rule == NULL) {
+		debug_err("Can't get entry");
+		close(sockfd);
+		return -1;
+	}
+	if(exec_rule(rule) == -1) {
+		debug_err("Unable to add entry");
+		free(rule);
+		close(sockfd);
+		return -1;
+	}
+        free(rule);
+
+	return (sockfd);
+}
+
+int kernel_td_unlisten(struct fd_request req)
+{
+	char *rule;
+	struct sockaddr_in address;
+
+	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_port = 0;
+	rule = get_rule(address, req.remote, req.local, FALSE, FALSE);
+	if(rule == NULL) {
+		debug_err("Can't get entry");
+		return -1;
+	}
+	if(exec_rule(rule) == -1) {
+		debug_err("Unable to delete entry");
+		free(rule);
+		return -1;
+	}
+        free(rule);
+	return (0);
+}
+
+int kernel_transdata_setup()
+{
+	if(kernel == LINUX_2_2)
+		return (-1);
+
+	if(init_chains() == -1) {
+		fprintf(stderr,
+			"\nChains " FROXSNAT " and/or " FROXDNAT
+			"could not be created. Data connections\n"
+			"will not be transparently proxied. Read"
+			" README.transdata for details\n\n");
+		return (-1);
+	}
+
+	return 0;
+}
+
+int init_chains()
+{
+    int ret;
+
+    // list to check whether the chain exists
+    ret = system(IPTABLES " -t nat -L " FROXSNAT " > /dev/null");
+    if (ret != 0)
+    {
+        // the chain does not exist, create it
+        ret = system(IPTABLES " -t nat -N " FROXSNAT);
+        if (ret != 0)
+            return -1;
+    }
+    else
+        return -1;
+    // same thing with dnat
+    ret = system(IPTABLES " -t nat -L " FROXDNAT " > /dev/null");
+    if (ret != 0)
+    {
+        ret = system(IPTABLES " -t nat -N " FROXDNAT);
+        if (ret != 0)
+            return -1;
+    }
+    else
+        return -1;
+
+    return 0;
+}
+
+int kernel_td_connect(struct fd_request req)
+{
+	struct sockaddr_in address;
+	char *rule_add = NULL, *rule_del = NULL;
+	int sockfd, i;
+
+	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		debug_perr("socket");
+		return (-1);
+	}
+
+	memset(&address, 0, sizeof(address));
+	address.sin_family = AF_INET;
+	i = bind_me(sockfd, &address, req.ports);
+
+	if(i) {
+		debug_err("bind failed");
+		close(sockfd);
+		return (-1);
+	}
+
+
+	/* DO SNAT */
+	address = config.listen_address;
+	address.sin_port = 0;
+	if((rule_add = get_rule(address, req.remote, req.local, TRUE, TRUE)) == NULL ||
+           (rule_del = get_rule(address, req.remote, req.local, TRUE, FALSE)) == NULL)
+        {
+            if (rule_add != NULL)
+                free(rule_add);
+            close(sockfd);
+            return -1;
+	}
+	if(exec_rule(rule_add) == -1) {
+            free(rule_add);
+            free(rule_del);
+            close(sockfd);
+            return -1;
+	}
+        free(rule_add);
+
+	i = connect(sockfd, (struct sockaddr *) &req.remote,
+		    sizeof(req.remote));
+
+	/* UNDO SNAT */
+	exec_rule(rule_del);
+	free(rule_del);
+
+	if(i) {
+		close(sockfd);
+		return (-1);
+	}
+
+	return (sockfd);
+}
+
+void kernel_td_flush(void)
+{
+    uid_t uid;
+
+    uid = geteuid();
+    write_log(VERBOSE, "TDS: Regaining privelidges for flushing chains");
+    seteuid(0);
+    write_log(VERBOSE, "Flushing chains...");
+
+    if ((system(IPTABLES " -t nat -F " FROXSNAT) == 0) &&
+        (system(IPTABLES " -t nat -F " FROXDNAT) == 0))
+        write_log(VERBOSE, "   Success");
+    else
+        write_log(VERBOSE, "   Failed");
+    write_log(VERBOSE, "TDS: Dropping them again");
+    seteuid(uid);
+}
+
+/* Return the requested iptables entry, as a command line.
+   It must be freed with free() after use. */
+char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
+               struct sockaddr_in to, int snat, int add_or_remove)
+{
+    static const int rule_size = 500;
+    const char *format = IPTABLES " %s %s -t nat -p tcp -s %s%s -d %s%s -j %s --to %s:%d";
+    char *rule = malloc(rule_size);
+    if (rule == NULL)
+        return NULL;
+    snprintf(rule, rule_size, format,
+             (add_or_remove) ? "-A" : "-D",
+             (snat) ? FROXSNAT : FROXDNAT,
+             inet_ntoa(src.sin_addr),
+             ((src.sin_addr.s_addr) == INADDR_ANY) ? "" : "/255.255.255.255",
+             inet_ntoa(dst.sin_addr),
+             ((dst.sin_addr.s_addr) == INADDR_ANY) ? "" : "/255.255.255.255",
+             (snat) ? "SNAT" : "DNAT",
+             inet_ntoa(to.sin_addr),
+             (int) ntohs(to.sin_port)
+        );
+    return rule;
+}
+
+int exec_rule(const char *rule)
+{
+    if (system(rule) == 0)
+        return 0;
+    else
+        return -1;
+}
+
+#else /*USE_LIBIPTC */
+int kernel_transdata_setup()
+{
+	if(kernel != LINUX_2_4)
+		return (0);
+
+	fprintf(stderr,
+		"You appear to be running a 2.4.x Linux kernel,"
+		" but frox was not configured\n"
+		"with --enable-libiptc or --enable-iptables. Data connections will NOT"
+		" be transparently proxied\n");
+	return (-1);
+}
+
+int kernel_td_connect(struct fd_request req)
+{
+	uid_t uid;
+	int sockfd, i;
+
+	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		debug_perr("socket");
+		return (-1);
+	}
+
+	uid = geteuid();
+	write_log(VERBOSE,
+		  "TDS: Regaining priveliges for bind-to-foreign-address");
+	seteuid(0);
+	i = bind(sockfd, (struct sockaddr *) &req.remote, sizeof(req.remote));
+	write_log(VERBOSE, "TDS: Dropping them again");
+	seteuid(uid);
+
+	if(i) {
+		debug_err("bind failed");
+		close(sockfd);
+		return (-1);
+	}
+
+	i = connect(sockfd, (struct sockaddr *) &req.remote,
+		    sizeof(req.remote));
+
+	if(i) {
+		close(sockfd);
+		return (-1);
+	}
+
+	return (sockfd);
+}
+
+int kernel_td_listen(struct fd_request req)
+{
+	uid_t uid;
+	int i, sockfd;
+
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+	uid = geteuid();
+	write_log(VERBOSE,
+		  "TDS: Regaining privelidges for bind-to-foreign-address");
+	seteuid(0);
+	i = bind(sockfd, (struct sockaddr *) &req.local, sizeof(req.local));
+	write_log(VERBOSE, "TDS: Dropping them again");
+	seteuid(uid);
+
+	if(i) {
+		debug_err("bind failed");
+		close(sockfd);
+		return (-1);
+	}
+
+	if(listen(sockfd, 5)) {
+		debug_perr("listen");
+		close(sockfd);
+		return (-1);
+	}
+	return (sockfd);
+}
+
+/*Kernel 2.2.x automatically cleans up after bind-to-foreign-address*/
+int kernel_td_unlisten(struct fd_request req)
+{
+	return (0);
+}
+
+void kernel_td_flush(void)
+{
+}
+
 #endif /*USE_LIBIPTC */
 #endif /*TRANS_DATA */

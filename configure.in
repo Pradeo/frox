@@ -225,6 +225,36 @@ AC_ARG_ENABLE(libiptc,
 	[AC_MSG_RESULT(no)]
 )
 
+AC_MSG_CHECKING(whether to use iptables for transparent data connection proxying)
+AC_ARG_ENABLE(iptables,
+	[  --enable-iptables        Use iptables for transparent data connection proxying],
+	[case "$enableval" in
+		yes)
+			AC_MSG_RESULT(yes)
+			AC_DEFINE(USE_IPTABLES,1,
+			          [Whether to use iptables for transparent
+				   data connection proxying])
+                        enable_iptables=yes
+			;;
+		*)
+                        enable_iptables=no
+			AC_MSG_RESULT(no)
+			;;
+	esac],
+	[AC_MSG_RESULT(no)]
+)
+
+AC_ARG_WITH([iptables],
+        [AS_HELP_STRING([--with-iptables],
+                        [path to iptables executable, default: /sbin/iptables])],
+        [IPTABLES=$withval],
+        [IPTABLES=/sbin/iptables])
+if test x"${enable_iptables}" = x"yes" -a ! -f $IPTABLES; then
+   AC_MSG_WARN([The iptables executable $IPTABLES was not found on the system, transparent data proxying will not work.])
+   AC_MSG_WARN([Change it using --with-iptables=<path>.])
+fi
+AC_DEFINE_UNQUOTED(IPTABLES,"$IPTABLES",[path to the iptables executable])
+
 AC_MSG_CHECKING(whether to support ftp-proxy style command control programs)
 AC_ARG_ENABLE(ccp,
        [  --enable-ccp            Enable ftp-proxy style command control programs],
