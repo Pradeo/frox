@@ -232,6 +232,11 @@ void pasv_parse(sstr * cmd, sstr * arg)
 	rclose(&info->server_data.fd);
 	rclose(&info->client_data.fd);
 
+	if(config.nopasv) {
+		send_cmessage(550, "Passive mode is not available");
+		return;
+	}
+
 	if(config.paconv) {
 		socklen_t len;
 		newbuf = sstr_init(60);

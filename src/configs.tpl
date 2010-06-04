@@ -42,6 +42,7 @@
   PidFile         FILENAME pidfile      - FALSE FALSE -
   APConv          BOOL     apconv       - TRUE  FALSE -
   PAConv          BOOL     paconv       - TRUE  FALSE -
+  NoPASV          BOOL     nopasv       - TRUE  FALSE -
   DoNTP           BOOL     ntp          - TRUE  FALSE -
   NTPAddress      ADDRPRT  ntpdest      - TRUE  FALSE -
   TcpOutgoingAddr ADDRESS  tcpoutaddr   - TRUE  FALSE -
