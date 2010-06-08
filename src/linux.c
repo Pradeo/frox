@@ -707,7 +707,7 @@ char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
                struct sockaddr_in to, int snat, int add_or_remove)
 {
     static const int rule_size = 500;
-    const char *format = IPTABLES " %s %s -t nat -p tcp -s %s%s -d %s%s -j %s --to %s:%d";
+    const char *format = IPTABLES " -t nat %s %s -p tcp -s %s%s -d %s%s -j %s --to %s:%d";
     char *rule = malloc(rule_size);
     if (rule == NULL)
         return NULL;
@@ -727,6 +727,7 @@ char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
 
 int exec_rule(const char *rule)
 {
+    write_log(VERBOSE, "exec_rule: %s\n", rule);
     if (system(rule) == 0)
         return 0;
     else
