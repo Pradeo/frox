@@ -614,8 +614,7 @@ int init_chains()
         if (ret != 0)
             return -1;
     }
-    else
-        return -1;
+
     // same thing with dnat
     ret = system(IPTABLES " -t nat -L " FROXDNAT " > /dev/null");
     if (ret != 0)
@@ -624,8 +623,6 @@ int init_chains()
         if (ret != 0)
             return -1;
     }
-    else
-        return -1;
 
     return 0;
 }
