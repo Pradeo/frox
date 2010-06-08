@@ -707,13 +707,17 @@ char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
                struct sockaddr_in to, int snat, int add_or_remove)
 {
     static const int rule_size = 500;
-    const char *format = IPTABLES " -t nat %s %s -p tcp -s %s%s -d %s%s -j %s --to %s:%d";
+    const char *format = IPTABLES " -t nat %s %s -p tcp --sport %d:%d --dport %d:%d -s %s%s -d %s%s -j %s --to %s:%d";
     char *rule = malloc(rule_size);
     if (rule == NULL)
         return NULL;
     snprintf(rule, rule_size, format,
              (add_or_remove) ? "-A" : "-D",
              (snat) ? FROXSNAT : FROXDNAT,
+             (src.sin_port == 0) ? 0 : ntohs(src.sin_port),
+             (src.sin_port == 0) ? 0xFFFF : ntohs(src.sin_port),
+             (dst.sin_port == 0) ? 0 : ntohs(dst.sin_port),
+             (dst.sin_port == 0) ? 0xFFFF : ntohs(dst.sin_port),
              inet_ntoa(src.sin_addr),
              ((src.sin_addr.s_addr) == INADDR_ANY) ? "" : "/255.255.255.255",
              inet_ntoa(dst.sin_addr),
