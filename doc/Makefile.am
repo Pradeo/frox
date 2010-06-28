@@ -5,17 +5,17 @@ EXTRA_DIST = ChangeLog FAQ INSTALL INTERNALS CREDITS README.transdata RELEASE SE
 all-local: FAQ.html FAQ frox.man frox.conf.man
 
 FAQ.html: FAQ.sgml
-	sgml2html -s 1 FAQ.sgml
+	-sgml2html -s 1 FAQ.sgml
 
 FAQ: FAQ.sgml
-	sgml2txt FAQ.sgml
-	mv FAQ.txt FAQ
+	-sgml2txt FAQ.sgml
+	-mv FAQ.txt FAQ
 
 frox.man: frox.sgml
-	sgml2txt -m frox.sgml
+	-sgml2txt -m frox.sgml
 
 frox.conf.man: frox.conf.sgml
-	sgml2txt -m frox.conf.sgml
+	-sgml2txt -m frox.conf.sgml
 
 distclean-local:
 	rm -f FAQ FAQ.txt FAQ*html frox.man
