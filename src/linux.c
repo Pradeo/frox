@@ -23,6 +23,8 @@
 
 ***************************************/
 
+#define _GNU_SOURCE
+
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include "common.h"
@@ -606,20 +608,20 @@ int init_chains()
     int ret;
 
     // list to check whether the chain exists
-    ret = system(IPTABLES " -t nat -L " FROXSNAT " > /dev/null");
+    ret = system(IPTABLES " -n -t nat -L " FROXSNAT " > /dev/null");
     if (ret != 0)
     {
         // the chain does not exist, create it
-        ret = system(IPTABLES " -t nat -N " FROXSNAT);
+        ret = system(IPTABLES "-n -t nat -N " FROXSNAT);
         if (ret != 0)
             return -1;
     }
 
     // same thing with dnat
-    ret = system(IPTABLES " -t nat -L " FROXDNAT " > /dev/null");
+    ret = system(IPTABLES " -n -t nat -L " FROXDNAT " > /dev/null");
     if (ret != 0)
     {
-        ret = system(IPTABLES " -t nat -N " FROXDNAT);
+        ret = system(IPTABLES " -n -t nat -N " FROXDNAT);
         if (ret != 0)
             return -1;
     }
@@ -706,26 +708,100 @@ void kernel_td_flush(void)
 char *get_rule(struct sockaddr_in src, struct sockaddr_in dst,
                struct sockaddr_in to, int snat, int add_or_remove)
 {
-    static const int rule_size = 500;
-    const char *format = IPTABLES " -t nat %s %s -p tcp --sport %d:%d --dport %d:%d -s %s%s -d %s%s -j %s --to %s:%d";
-    char *rule = malloc(rule_size);
-    if (rule == NULL)
-        return NULL;
-    snprintf(rule, rule_size, format,
-             (add_or_remove) ? "-A" : "-D",
-             (snat) ? FROXSNAT : FROXDNAT,
-             (src.sin_port == 0) ? 0 : ntohs(src.sin_port),
-             (src.sin_port == 0) ? 0xFFFF : ntohs(src.sin_port),
-             (dst.sin_port == 0) ? 0 : ntohs(dst.sin_port),
-             (dst.sin_port == 0) ? 0xFFFF : ntohs(dst.sin_port),
-             inet_ntoa(src.sin_addr),
-             ((src.sin_addr.s_addr) == INADDR_ANY) ? "" : "/255.255.255.255",
-             inet_ntoa(dst.sin_addr),
-             ((dst.sin_addr.s_addr) == INADDR_ANY) ? "" : "/255.255.255.255",
-             (snat) ? "SNAT" : "DNAT",
-             inet_ntoa(to.sin_addr),
-             (int) ntohs(to.sin_port)
-        );
+    int retval;
+
+    char *rule_srcport = NULL;
+    char *rule_dstport = NULL;
+    char *rule_srcaddr = NULL;
+    char *rule_dstaddr = NULL;
+    char *rule_to = NULL;
+    char *rule = NULL;
+
+    if (src.sin_port != 0) {
+      retval = asprintf(&rule_srcport, "--sport %d",
+			ntohs(src.sin_port));
+      if (retval < 0)
+	{
+	  rule_srcport = NULL;
+	  goto fail;
+	}
+    }
+
+    if (dst.sin_port != 0) {
+      retval = asprintf(&rule_dstport, "--dport %d",
+			ntohs(dst.sin_port));
+      if (retval < 0)
+	{
+	  rule_dstport = NULL;
+	  goto fail;
+	}
+    }
+
+    if (src.sin_addr.s_addr != INADDR_ANY)
+      {
+	retval = asprintf(&rule_srcaddr, "-s %s",
+			  inet_ntoa(src.sin_addr));
+      if (retval < 0)
+	{
+	  rule_srcaddr = NULL;
+	  goto fail;
+	}
+      }
+
+    if (dst.sin_addr.s_addr != INADDR_ANY)
+      {
+	retval = asprintf(&rule_dstaddr, "-s %s",
+			  inet_ntoa(dst.sin_addr));
+      if (retval < 0)
+	{
+	  rule_dstaddr = NULL;
+	  goto fail;
+	}
+      }
+
+    if (to.sin_port == 0)
+      {
+	retval = asprintf(&rule_to, "--to %s",
+			  inet_ntoa(to.sin_addr));
+      if (retval < 0)
+	{
+	  rule_to = NULL;
+	  goto fail;
+	}
+      }
+    else
+      {
+	retval = asprintf(&rule_to, "--to %s:%d",
+			  inet_ntoa(to.sin_addr),
+			  ntohs(to.sin_port));
+      if (retval < 0)
+	{
+	  rule_to = NULL;
+	  goto fail;
+	}
+      }
+
+    retval =
+      asprintf(&rule,
+	       IPTABLES " -t nat %s %s -p tcp %s %s %s %s -j %s %s",
+	       add_or_remove ? "-A" : "-D",
+	       snat ? FROXSNAT : FROXDNAT,
+	       (rule_srcport == NULL) ? "" : rule_srcport,
+	       (rule_srcaddr == NULL) ? "" : rule_srcaddr,
+	       (rule_dstport == NULL) ? "" : rule_dstport,
+	       (rule_dstaddr == NULL) ? "" : rule_dstaddr,
+	       snat ? "SNAT" : "DNAT",
+	       rule_to);
+      if (retval < 0)
+	rule = NULL;
+
+ fail:
+    free(rule_srcport);
+    free(rule_dstport);
+    free(rule_srcaddr);
+    free(rule_dstaddr);
+    free(rule_to);
+
     return rule;
 }
 
